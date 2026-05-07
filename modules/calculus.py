@@ -14,13 +14,20 @@ RULES = [
     "For DIFFERENTIAL EQUATIONS: Use operation 'solve_ode'. Represent y as a function of x: Function('y')(x).",
     "For INTEGRALS: Set 'lower_bound' and 'upper_bound' if definite.",
     "For IMPLICIT DIFFERENTIATION or INFINITE NESTED RADICALS (...∞): Use operation 'differentiate'. Rewrite infinite roots algebraically (e.g. y = sqrt(x + y) -> Eq(y**2, x + y)).",
-    "For INVERSE TRIG FUNCTIONS: Use asin, acos, atan, acot. Do NOT use ^-1. Do NOT wrap standard expressions in brackets [...] as they create lists."
+    "For INVERSE TRIG FUNCTIONS: Use asin, acos, atan, acot. Do NOT use ^-1. Do NOT wrap standard expressions in brackets [...] as they create lists.",
+    "For TRIGONOMETRIC EXPANSION (sin(A+B), cos(A-B), tan(A+B), etc.): Use operation 'trigexpand'. This expands to component terms like sin(A)cos(B) + cos(A)sin(B).",
+    "IMPORTANT: If user types sin(A+B) or similar trig expression without equals sign, use 'trigexpand' operation to get the expanded form."
 ]
 
 EXAMPLES = [
     'User problem: Solve dy/dx = x * y\nJSON: {"operation":"solve_ode","equation":"Eq(Derivative(Function(\'y\')(x), x), x * Function(\'y\')(x))","variable":"x"}',
     'User problem: differentiate y = sqrt(tan(x) + sqrt(tan(x) + ...))\nJSON: {"operation":"differentiate","equation":"Eq(y**2, tan(x) + y)","variables":["y", "x"]}',
-    'User problem: differentiate tan^-1(cot(x))\nJSON: {"operation":"differentiate","expression":"atan(cot(x))","variable":"x"}'
+    'User problem: differentiate tan^-1(cot(x))\nJSON: {"operation":"differentiate","expression":"atan(cot(x))","variable":"x"}',
+    'User problem: expand sin(a+b)\nJSON: {"operation":"trigexpand","expression":"sin(a + b)"}',
+    'User problem: expand cos(a-b)\nJSON: {"operation":"trigexpand","expression":"cos(a - b)"}',
+    'User problem: expand sin(A+B)\nJSON: {"operation":"trigexpand","expression":"sin(A + B)"}',
+    'User problem: expand cos(A-B)\nJSON: {"operation":"trigexpand","expression":"cos(A - B)"}',
+    'User problem: expand tan(A+B)\nJSON: {"operation":"trigexpand","expression":"tan(A + B)"}'
 ]
 
 # We define y_sym locally to ensure we have a SYMBOL for differentiation
@@ -190,15 +197,18 @@ def execute(task: MathTask, expr: sp.Basic, variables: list, equations: list):
             low = parse_math(task.lower_bound, get_all_locals())
             up = parse_math(task.upper_bound, get_all_locals())
             return sp.integrate(expr, (variable, low, up))
-            
+
         # Prioritize custom antiderivatives for cleaner output
         custom_trig = trig_power_antiderivative(expr, variable)
         if custom_trig is not None: return custom_trig
         custom_log = linear_root_log_antiderivative(expr, variable)
         if custom_log is not None: return custom_log
-        
+
         return sp.simplify(sp.integrate(expr, variable))
-        
+
+    if task.operation == "trigexpand":
+        return sp.expand_trig(expr)
+
     return None
 
 # --- STEP GENERATION ---
@@ -228,12 +238,26 @@ def get_steps(task: MathTask, expr_str: str, result: Any):
         expr = parse_math(expr_str, locals_dict)
         if isinstance(expr, list) and len(expr) > 0: expr = expr[0]
         variable = sp.Symbol(task.variable) if task.variable else sp.Symbol('x')
-        
+
         lines.append("1. Identify the integrand:")
         lines.append(indented_math(expr))
         lines.extend(antiderivative_method_steps(expr, variable))
         lines.append("3. Final result:")
         lines.append(indented_math(result))
         return "\n".join(lines)
-        
+
+    if task.operation == "trigexpand":
+        lines.extend([
+            "1. Start with the trigonometric expression:", indented_math(expr_str),
+            "2. Apply trigonometric addition/subtraction identities:",
+            "   • sin(A±B) = sin(A)cos(B) ± cos(A)sin(B)",
+            "   • cos(A±B) = cos(A)cos(B) ∓ sin(A)sin(B)",
+            "   • tan(A±B) = (tan(A) ± tan(B)) / (1 ∓ tan(A)tan(B))",
+            "3. The expanded form is:",
+            indented_math(result),
+            "4. Final Identity:",
+            indented_math(sp.Eq(sp.sin(sp.Symbol('A') + sp.Symbol('B')), result))
+        ])
+        return "\n".join(lines)
+
     return None

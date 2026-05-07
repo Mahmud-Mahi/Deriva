@@ -37,10 +37,9 @@ def parse_math(text: str, local_dict: dict) -> sp.Basic:
         standard_transformations
     )
     text = normalize_equation_text(text)
-    transformations = standard_transformations + (
-        implicit_multiplication_application, 
-        convert_xor
-    )
+    transformations = standard_transformations + (convert_xor,)
+    if "Function(" not in text and "Derivative(" not in text:
+        transformations += (implicit_multiplication_application,)
     return parse_expr(
         text,
         local_dict=local_dict,
