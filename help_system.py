@@ -13,6 +13,7 @@ ANSI_BOLD_CYAN = "\033[1;96m"
 ANSI_BOLD_GREEN = "\033[1;32m"
 ANSI_BOLD_YELLOW = "\033[1;33m"
 ANSI_BOLD_WHITE = "\033[1;37m"
+ANSI_BOLD_LIGHT_GREY = "\033[1;37m"
 ANSI_DIM_WHITE = "\033[2;37m"
 
 def colorize(text: str, color: str) -> str:
@@ -21,15 +22,23 @@ def colorize(text: str, color: str) -> str:
 
 
 def print_help_banner():
-    """Print the main help banner."""
-    banner = f"""
-{colorize("╔══════════════════════════════════════════════════════════╗", ANSI_BOLD_CYAN)}
-{colorize("║", ANSI_BOLD_CYAN)}  Deriva — Precision in Every Step                       {colorize("║", ANSI_BOLD_CYAN)}
-{colorize("║", ANSI_BOLD_CYAN)}  AI-Powered Symbolic Math Solver                        {colorize("║", ANSI_BOLD_CYAN)}
-{colorize("║", ANSI_BOLD_CYAN)}  Version 1.0 | Python 3.10+ | Built with SymPy         {colorize("║", ANSI_BOLD_CYAN)}
-{colorize("╚══════════════════════════════════════════════════════════╝", ANSI_BOLD_CYAN)}
-"""
-    print(banner)
+    """Print the main help banner with Deriva logo."""
+    logo_lines = [
+        " ____  _____ ____  _____     ___     ",
+        "|  _ \\| ____|  _ \\|_ _\\ \\   / / \\    ",
+        "| | | |  _| | |_) || | \\ \\ / / _ \\   ",
+        "| |_| | |___|  _ < | |  \\ V / ___ \\  ",
+        "|____/|_____|_| \\_\\___|  \\_/_/   \\_\\ ",
+    ]
+    slogan = "B E Y O N D   E Q U A T I O N S"
+    
+    print()
+    for line in logo_lines:
+        print(colorize(line, ANSI_BOLD_CYAN))
+    print(colorize(slogan.center(35), ANSI_BOLD_LIGHT_GREY))
+    print()
+    print(colorize("AI-Powered Symbolic Math Solver | Version 1.0 | Python 3.10+", ANSI_DIM_WHITE))
+    print()
 
 
 def print_quick_start():
@@ -104,9 +113,10 @@ def print_interactive_commands():
     print(f"\n{colorize('💻 INTERACTIVE MODE COMMANDS', ANSI_BOLD_GREEN)}\n")
     
     commands = [
+        ("/help", "Show complete help and documentation"),
+        ("help", "Show complete help (alias)"),
         ("exit", "Quit Deriva"),
         ("quit", "Quit Deriva"),
-        ("help", "Show topic list (in interactive mode)"),
         ("?", "Show available topics"),
         ("/TOPIC problem", "Route to specific topic module"),
         ("#TOPIC problem", "Alternative topic prefix syntax"),
@@ -364,7 +374,30 @@ def print_full_help():
     
     # Footer
     print(f"\n{colorize('─' * 60, ANSI_DIM_WHITE)}")
-    print(f"{colorize('For more help, visit: https://github.com/yourusername/deriva', ANSI_DIM_WHITE)}")
+    print(f"{colorize('For more help, visit: https://github.com/Mahmud-Mahi/Deriva', ANSI_DIM_WHITE)}")
+    print(f"{colorize('Documentation: Read README.md, EMBEDDINGS_GUIDE.md', ANSI_DIM_WHITE)}")
+    print(f"{colorize('Questions? Open an issue on GitHub', ANSI_DIM_WHITE)}\n")
+
+
+def print_full_help_no_banner():
+    """Print complete help documentation without banner (for interactive mode)."""
+    print_quick_start()
+    print_command_line_options()
+    print_usage_examples()
+    print_topic_routing()
+    print_interactive_commands()
+    print_features()
+    print_requirements()
+    print_environment_setup()
+    print_configuration()
+    print_advanced_usage()
+    print_tips_and_tricks()
+    print_api_reference()
+    print_troubleshooting()
+    
+    # Footer
+    print(f"\n{colorize('─' * 60, ANSI_DIM_WHITE)}")
+    print(f"{colorize('For more help, visit: https://github.com/Mahmud-Mahi/Deriva', ANSI_DIM_WHITE)}")
     print(f"{colorize('Documentation: Read README.md, EMBEDDINGS_GUIDE.md', ANSI_DIM_WHITE)}")
     print(f"{colorize('Questions? Open an issue on GitHub', ANSI_DIM_WHITE)}\n")
 

@@ -1,9 +1,12 @@
 import argparse
 import itertools
 import json
+import os
 import re
 import sys
-import os
+import struct
+import fcntl
+import termios
 import threading
 import time
 import urllib.error
@@ -31,8 +34,8 @@ from modules import (
     execute_topic_task,
     get_module_for_topic
 )
-from embeddings import get_embedding_engine, detect_topic_by_embedding
-from help_system import print_brief_help, print_full_help
+from embeddings import get_embedding_engine, detect_topic_by_embedding, get_topic_prompt_enhancement
+from help_system import print_brief_help, print_full_help, print_full_help_no_banner
 
 try:
     import readline
@@ -79,12 +82,52 @@ MATH_TASK_JSON_SCHEMA: dict[str, Any] = {
 HISTORY_FILE_PATH = Path.home() / ".cache/deriva_history"
 
 def setup_history():
+    """Setup command history with proper readline configuration."""
     if not HISTORY_FILE_PATH.parent.exists():
         HISTORY_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
     if readline:
         try:
             readline.read_history_file(HISTORY_FILE_PATH)
         except FileNotFoundError:
+            pass
+        
+        try:
+            # Configure readline for proper line editing behavior
+            if hasattr(readline, 'parse_and_bind'):
+                # Use emacs mode for better arrow key and backspace support
+                readline.parse_and_bind('set editing-mode emacs')
+                # Enable horizontal scrolling for long inputs to fix backspace issues
+                readline.parse_and_bind('set horizontal-scroll-mode on')
+                # Allow auto-mark of matched text from history
+                readline.parse_and_bind('set mark-modified-lines on')
+                
+                # Word-wise navigation and editing
+                readline.parse_and_bind(r'"\M-f": forward-word')
+                readline.parse_and_bind(r'"\M-b": backward-word')
+                readline.parse_and_bind(r'"\M-d": kill-word')
+                readline.parse_and_bind(r'"\M-DEL": backward-kill-word')
+                readline.parse_and_bind(r'"\C-w": backward-kill-word')
+                
+                # Case conversion
+                readline.parse_and_bind(r'"\M-u": upcase-word')
+                readline.parse_and_bind(r'"\M-l": downcase-word')
+                
+                # Backspace and delete - map both key codes to backward-delete-char
+                readline.parse_and_bind(r'"\C-h": backward-delete-char')
+                readline.parse_and_bind(r'"\C-?": backward-delete-char')
+                readline.parse_and_bind(r'"DEL": backward-delete-char')
+                
+                # Additional bindings for reliability
+                readline.parse_and_bind(r'"\177": backward-delete-char')  # Backspace ASCII code
+                
+                # Allow deleting characters and handling
+                readline.parse_and_bind(r'"\C-d": delete-char')
+                
+                # Make sure history is searchable
+                readline.parse_and_bind(r'"\C-r": reverse-search-history')
+                readline.parse_and_bind(r'"\C-s": forward-search-history')
+        except Exception:
             pass
 
 def save_history():
@@ -131,10 +174,52 @@ def ask_ollama(prompt: str, model: str, url: str, format_value: Any | None = Non
     except Exception as e:
         raise RuntimeError(f"Ollama connection error: {e}")
 
-def make_task(problem: str, model: str, url: str) -> MathTask:
-    rules = "\n".join(f"- {rule}" for rule in get_all_rules())
+def make_task(problem: str, model: str, url: str, topic: str | None = None) -> MathTask:
+    rules = "\n".join(f"· {rule}" for rule in get_all_rules())
     examples = "\n\n".join(get_all_examples())
-    prompt = f"Convert to SymPy JSON:\nRules:\n{rules}\nExamples:\n{examples}\nProblem: {problem}"
+    
+    # Get topic-specific enhancements if available
+    topic_enhancement = get_topic_prompt_enhancement(topic) if topic else ""
+    
+    # First attempt: comprehensive prompt with full structure and topic awareness
+    prompt = f"""### TASK: Convert Math Problem to SymPy JSON
+
+**OUTPUT FORMAT (strict JSON):**
+{{
+  "operation": "solve|evaluate|simplify|factor|expand",
+  "expression": "SymPy expression or empty string",
+  "equation": "SymPy equation (lhs=rhs) or empty string",
+  "equations": ["equ1", "equ2", ...] or empty array,
+  "variable": "primary variable or empty string",
+  "variables": ["var1", "var2"] or empty array
+}}
+
+**OPERATION TYPES:**
+· solve: Solve equation(s) for variable(s). Use when problem asks "find", "solve", "determine", "what is x"
+· evaluate: Evaluate/compute function/expression with constraints. Use for "evaluate", "compute", "apply", "find value"
+· simplify: Simplify/reduce expression. Use for "simplify", "reduce", "show", "combine"
+· factor: Factor polynomial/expression. Use for "factor", "factorize", "decompose"
+· expand: Expand expression. Use for "expand", "distribute", "open brackets"
+
+**CRITICAL RULES:**
+{rules}
+
+**REFERENCE EXAMPLES:**
+{examples}
+
+**PROBLEM TO SOLVE:**
+{problem}{topic_enhancement}
+
+**OUTPUT INSTRUCTIONS:**
+1. Return ONLY valid JSON object (no markdown backticks, no explanations, no extra text)
+2. "operation" field is REQUIRED - choose most appropriate type
+3. Detect ALL variables from the problem and list in "variables"
+4. For single variable x -> set both "variable": "x" AND "variables": ["x"]
+5. Use SymPy syntax: ** for power, sqrt(), Eq(lhs, rhs) for equations
+6. Multiple equations go in "equations" array, not "equation" field
+7. If problem has bounds/constraints, include in expression/equation logic
+8. Keep all expressions valid and concise
+9. Empty fields use empty string "" for single values, empty array [] for lists"""
 
     last_error: Exception | None = None
     for attempt in range(3):
@@ -161,15 +246,48 @@ def make_task(problem: str, model: str, url: str) -> MathTask:
         if isinstance(data, dict) and "operation" in data:
             return MathTask(**data)
 
-        last_error = last_error or RuntimeError("missing operation in returned task JSON")
+        last_error = last_error or RuntimeError("missing 'operation' field in returned task JSON")
 
-        # Nudge the model more aggressively on retry
-        prompt = (
-            "Return ONLY valid JSON for the MathTask. No markdown, no extra text.\n"
-            f"Problem: {problem}\n"
-            f"Rules:\n{rules}\n"
-            f"Examples:\n{examples}\n"
-        )
+        # Retry with stricter, more direct prompt
+        if attempt == 1:
+            prompt = f"""RESPOND WITH ONLY JSON - NO OTHER TEXT.
+
+Format:
+{{
+  "operation": "solve|evaluate|simplify|factor|expand",
+  "expression": "...",
+  "equation": "...",
+  "equations": [...],
+  "variable": "...",
+  "variables": [...]
+}}
+
+Problem: {problem}
+
+Rules:
+{rules}
+
+Examples:
+{examples}{topic_enhancement}
+
+Return valid JSON object only:"""
+        else:
+            # Final retry: minimal but explicit prompt
+            prompt = f"""Generate JSON only (valid JSON, nothing else):
+
+Problem: {problem}
+
+Respond with this format:
+{{
+  "operation": "solve",
+  "expression": "",
+  "equation": "",
+  "equations": [],
+  "variable": "x",
+  "variables": ["x"]
+}}
+
+Adjust fields for the problem above. Return JSON only."""
 
     raise RuntimeError(f"Failed to get valid task JSON from Ollama: {last_error}")
 
@@ -243,40 +361,98 @@ def print_logo() -> None:
     print(colorize(APP_SLOGAN.center(width), ANSI_BOLD_LIGHT_GREY))
     print()
 
+def get_terminal_width() -> int:
+    """Get terminal width, default to 80 if unable to determine."""
+    try:
+        size = struct.unpack('HHHW', fcntl.ioctl(sys.stdout, termios.TIOCSWINSZ, struct.pack('HHHW', 0, 0, 0, 0)))
+        return size[1] if size[1] > 0 else 80
+    except:
+        return 80
+
+def print_wrapped_input(text: str, prompt: str, cursor_pos: int) -> int:
+    """
+    Print text with wrapping and return number of lines used.
+    Handles proper display of multi-line input on terminal.
+    """
+    prompt_len = len(prompt)
+    terminal_width = get_terminal_width()
+    available_width = terminal_width - prompt_len
+    
+    if available_width < 20:  # Minimum usable width
+        available_width = 20
+    
+    lines_used = 1
+    current_col = prompt_len
+    
+    # Display prompt
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    
+    # Display text with wrapping
+    for char in text:
+        if char == '\n':
+            sys.stdout.write('\n')
+            current_col = 0
+            lines_used += 1
+        else:
+            if current_col >= available_width:
+                sys.stdout.write('\n')
+                current_col = 0
+                lines_used += 1
+            sys.stdout.write(char)
+            current_col += 1
+    
+    sys.stdout.flush()
+    return lines_used
+
 def get_input() -> tuple[str, str | None]:
     """
-    Get user input and parse for topic prefix.
-    First checks for explicit prefix (e.g., /vector), then uses embeddings for semantic detection.
-    Returns (cleaned_input, topic) where topic is None if no prefix/detection found.
+    Get user input with proper long text support.
+    Uses Python's built-in input() for terminal wrapping.
+    Arrow keys, backspace, and history work automatically via readline.
+    Press ESC or Ctrl+C to cancel input.
     """
-    lines = []
     prompt = colorize(INPUT_PROMPT, ANSI_BOLD_CYAN)
+    lines = []
+    current_prompt = prompt
+    
     while True:
         try:
-            line = input(prompt)
+            line = input(current_prompt)
+            
+            # If line ends with backslash, continue multi-line input
             if line.endswith('\\'):
-                lines.append(line[:-1])
-                prompt = colorize(" >  ", ANSI_BOLD_CYAN)
+                lines.append(line[:-1])  # Remove the backslash
+                current_prompt = colorize(" >  ", ANSI_BOLD_CYAN)
             else:
                 lines.append(line)
                 break
+                
         except EOFError:
             print("\nGoodbye.")
             sys.exit(0)
         except KeyboardInterrupt:
-            print("\nGoodbye.")
-            sys.exit(0)
+            # Ctrl+C cancels input - return empty
+            print()
+            return "", None
+    
     raw_input = "\n".join(lines).strip()
-
-    # 1. First check for explicit topic prefix (e.g., /vector, #algebra)
+    
+    if not raw_input:
+        return "", None
+    
+    # Parse topic prefix
     topic, cleaned_input = parse_topic_prefix(raw_input)
     
-    # 2. If no explicit prefix and embeddings available, try semantic detection
-    if topic is None and EMBEDDING_ENGINE is not None:
+    # Skip semantic detection for special commands
+    special_commands = {"help", "/help", "exit", "quit"}
+    is_special_command = cleaned_input.lower() in special_commands
+    
+    # Semantic detection if available
+    if topic is None and EMBEDDING_ENGINE is not None and not is_special_command:
         result = detect_topic_by_embedding(cleaned_input, EMBEDDING_ENGINE, threshold=0.55)
         if result:
             topic, confidence = result
-            # Show auto-detected topic with confidence
             confidence_pct = int(confidence * 100)
             detection_msg = colorize(f"[auto-detected: /{topic} ({confidence_pct}% confidence)]", ANSI_DIM_WHITE)
             print(f"{detection_msg}")
@@ -325,9 +501,9 @@ def run_pipeline(problem: str, model: str, url: str, debug: bool, topic: str | N
                     topic, problem, model, url
                 )
         else:
-            # Original LLM-based routing
+            # Original LLM-based routing - let make_task handle semantic detection internally
             with thinking_indicator():
-                task = make_task(problem, model, url)
+                task = make_task(problem, model, url, None)
                 result = solve_with_sympy(task)
 
         if debug:
@@ -406,8 +582,13 @@ def main():
         print(f"Semantic Detection: {embedding_status} (nomic-embed-text not available)")
     
     print(f"\n{ANSI_DIM_WHITE}--- Instructions ---")
-    print(f"• Type 'exit' or 'quit' or press Ctrl+C to close.")
-    print(f"• For MULTILINE input, end your line with a backslash (\\) and press Enter.")
+    print(f"• Type 'exit' or 'quit' to close the application.")
+    print(f"• Press ESC to cancel input and start over.")
+    print(f"• Use arrow keys (↑↓) to navigate history, (←→) to move cursor.")
+    print(f"• Use backspace or delete to remove characters.")
+    print(f"• Type long questions (300+ words) - input wraps automatically.")
+    print(f"• Press Ctrl+C to interrupt a running operation.")
+    print(f"• Type '/help' for detailed documentation.")
     print(f"• Use /topic prefix for explicit topic selection (e.g., '/vector solve |v|=5').{ANSI_RESET}\n")
 
     while True:
@@ -416,9 +597,20 @@ def main():
         if problem.lower() in {"exit", "quit"}:
             print("Goodbye.")
             break
+        
+        # Handle /help command
+        if problem.lower() == "help" or problem.lower().startswith("/help"):
+            print_full_help_no_banner()
+            continue
 
         # Pass the problem and topic to run_pipeline
-        run_pipeline(problem, args.model, args.ollama_url, args.debug, topic)
+        try:
+            run_pipeline(problem, args.model, args.ollama_url, args.debug, topic)
+        except KeyboardInterrupt:
+            print(f"\n{colorize('Operation cancelled by user.', ANSI_BOLD_RED)}")
+            # The thinking_indicator context manager handles its own cleanup (stopping the thread)
+            # if it's interrupted by the exception.
+
         save_history()
 
 if __name__ == "__main__":

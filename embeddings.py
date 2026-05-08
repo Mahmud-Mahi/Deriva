@@ -126,17 +126,31 @@ class EmbeddingEngine:
 
 # Pre-defined topic descriptions for semantic matching
 TOPIC_DESCRIPTIONS = {
-    "algebra": "Solving equations, factoring polynomials, expanding expressions, simplifying algebraic terms",
-    "vector": "Vectors, dot product, cross product, vector operations, magnitude, direction",
-    "circle": "Circles, radius, diameter, tangent lines, chord, center, circumference",
-    "straight-line": "Lines, slope, intercepts, linear equations, parallel lines, perpendicular lines",
-    "conics": "Conic sections, parabola, ellipse, hyperbola, eccentricity, foci, directrix",
-    "matrix": "Matrices, determinant, inverse, eigenvalues, eigenvectors, matrix operations",
-    "trigonometry": "Trigonometric functions, sin, cos, tan, angles, identities, inverse trig",
-    "inverse-trigonometry": "Inverse trigonometric functions, arcsin, arccos, arctan",
-    "calculus": "Derivatives, integrals, limits, series, differential equations, continuity",
-    "combination": "Permutations, combinations, factorial, nCr, nPr, arrangements, selections",
-    "geometry": "Geometric shapes, areas, perimeters, volumes, spatial relationships",
+    "algebra": "Solving equations, factoring polynomials, expanding expressions, simplifying algebraic terms, finding roots",
+    "vector": "Vectors, dot product, cross product, vector operations, magnitude, direction, unit vectors",
+    "circle": "Circles, radius, diameter, tangent lines, chord, center, circumference, area",
+    "straight-line": "Lines, slope, intercepts, linear equations, parallel lines, perpendicular lines, distance",
+    "conics": "Conic sections, parabola, ellipse, hyperbola, eccentricity, foci, directrix, asymptotes",
+    "matrix": "Matrices, determinant, inverse, eigenvalues, eigenvectors, matrix operations, rank, trace",
+    "trigonometry": "Trigonometric functions, sin, cos, tan, angles, identities, inverse trig, wave functions",
+    "inverse-trigonometry": "Inverse trigonometric functions, arcsin, arccos, arctan, domain and range",
+    "calculus": "Derivatives, integrals, limits, series, differential equations, continuity, optimization",
+    "combination": "Permutations, combinations, factorial, nCr, nPr, arrangements, selections, counting",
+    "geometry": "Geometric shapes, areas, perimeters, volumes, spatial relationships, triangles, polygons",
+}
+
+# Topic-specific prompt enhancements
+TOPIC_PROMPT_ENHANCEMENTS = {
+    "algebra": "\nUse algebra-specific functions: solve_equation, polynomial_roots, solve_system, solve_inequality.",
+    "vector": "\nUse vector-specific functions: dot product (dot), cross product (cross), normalize vectors.",
+    "circle": "\nUse circle-specific functions: Circle class, distance calculations, radius, tangent conditions.",
+    "straight-line": "\nUse line-specific functions: Line class, slope, intercepts, distance from point to line.",
+    "conics": "\nUse conic-specific functions or solve conic equations directly. Identify parabola/ellipse/hyperbola.",
+    "matrix": "\nUse matrix operations: Matrix class, det() for determinant, inv() for inverse, eigenvals().",
+    "trigonometry": "\nUse trig functions: sin, cos, tan and their combinations. Apply trig identities where needed.",
+    "inverse-trigonometry": "\nUse inverse trig: asin, acos, atan. Handle domain restrictions carefully.",
+    "calculus": "\nUse calculus functions: diff() for derivative, integrate() for integral, limit() for limits.",
+    "combination": "\nUse combinatorial functions: factorial(), binomial(), nC, nP. Count arrangements carefully.",
 }
 
 
@@ -173,3 +187,16 @@ def detect_topic_by_embedding(
             return None
     
     return embedding_engine.find_best_topic(problem, TOPIC_DESCRIPTIONS, threshold)
+
+
+def get_topic_prompt_enhancement(topic: str) -> str:
+    """
+    Get topic-specific prompt enhancement for better LLM guidance.
+    
+    Args:
+        topic: The detected or specified topic
+        
+    Returns:
+        Enhancement text to append to main prompt
+    """
+    return TOPIC_PROMPT_ENHANCEMENTS.get(topic, "")

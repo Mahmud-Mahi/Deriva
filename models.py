@@ -12,3 +12,4 @@ class MathTask:
     upper_bound: str = ""
     point: str = ""
     direction: str = "+-"
+    function: str = ""
